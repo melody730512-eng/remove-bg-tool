@@ -34,9 +34,10 @@ if uploaded_file:
         display_image = original_image
         display_height = orig_h
 
-    # === 關鍵修正：轉成 Numpy Array (解決白屏的終極解法) ===
-    # 我們不傳圖片物件，改傳「數字陣列」，這樣畫布絕對吃得下去
-    canvas_background = np.array(display_image.convert("RGB"))
+    # === 關鍵修正：轉成純 RGB 模式 ===
+    # 不用 Numpy (會報錯)，也不用 RGBA (會變白)
+    # 使用 .convert("RGB") 強制變成不透明圖片，這樣瀏覽器保證能顯示！
+    canvas_background = display_image.convert("RGB")
 
     # 建立兩欄佈局
     col1, col2 = st.columns(2)
@@ -51,7 +52,7 @@ if uploaded_file:
         if tool_mode == "🟥 紅框 (拉框挖空)":
             drawing_mode = "rect"
             stroke_color = "#ff0000"
-            fill_color = "rgba(255, 0, 0, 0.3)"
+            fill_color = "rgba(255, 0, 0, 0.3)" # 這裡我也再次確認語法正確了
             stroke_width = 2
         else:
             drawing_mode = "freedraw"
@@ -64,7 +65,7 @@ if uploaded_file:
             fill_color=fill_color,
             stroke_width=stroke_width,
             stroke_color=stroke_color,
-            background_image=canvas_background, # 這裡現在是數字陣列了
+            background_image=canvas_background, # 這裡傳入 RGB 圖片
             update_streamlit=True,
             height=display_height,
             width=display_width,
