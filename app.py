@@ -17,7 +17,7 @@ st.markdown("""
 uploaded_file = st.file_uploader("請將圖片拖曳到這裡 (JPG/PNG)", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
-    # 1. 讀取原始圖片 (這是高清原檔，絕對不動它)
+    # 1. 讀取原始圖片
     original_image = Image.open(uploaded_file).convert("RGBA")
     orig_w, orig_h = original_image.size
 
@@ -34,10 +34,9 @@ if uploaded_file:
         display_image = original_image
         display_height = orig_h
 
-    # === 關鍵修正：強制顯影魔法 ===
-    # 將顯示用的圖片強制轉為 RGB (不透明)，解決 PNG 變白的問題
-    # 這只會影響「螢幕上看到的」，不會影響「下載的去背結果」
-    canvas_background = display_image.convert("RGB")
+    # === 關鍵修正：轉成 Numpy Array (解決白屏的終極解法) ===
+    # 我們不傳圖片物件，改傳「數字陣列」，這樣畫布絕對吃得下去
+    canvas_background = np.array(display_image.convert("RGB"))
 
     # 建立兩欄佈局
     col1, col2 = st.columns(2)
@@ -65,7 +64,7 @@ if uploaded_file:
             fill_color=fill_color,
             stroke_width=stroke_width,
             stroke_color=stroke_color,
-            background_image=canvas_background, # 使用強制顯影的圖片
+            background_image=canvas_background, # 這裡現在是數字陣列了
             update_streamlit=True,
             height=display_height,
             width=display_width,
@@ -106,7 +105,7 @@ if uploaded_file:
             byte_im = buf.getvalue()
 
             st.download_button(
-                label="💎 下載高清原圖 PNG (1920x1080)",
+                label="💎 下載高清原圖 PNG",
                 data=byte_im,
                 file_name="hd_transparent.png",
                 mime="image/png"
