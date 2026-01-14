@@ -52,4 +52,64 @@ if uploaded_file:
         if tool_mode == "🟥 紅框 (拉框挖空)":
             drawing_mode = "rect"
             stroke_color = "#ff0000"
-            fill_color = "rgba(255, 0
+            fill_color = "rgba(255, 0, 0, 0.3)"
+            stroke_width = 2
+        else:
+            drawing_mode = "freedraw"
+            stroke_color = "#00ff00"
+            fill_color = "rgba(0, 255, 0, 0)"
+            stroke_width = st.slider("🟩 綠筆大小", 1, 50, 15)
+
+        # --- 建立畫布 ---
+        canvas_result = st_canvas(
+            fill_color=fill_color,
+            stroke_width=stroke_width,
+            stroke_color=stroke_color,
+            background_image=canvas_background, # 使用強制顯影的圖片
+            update_streamlit=True,
+            height=display_height,
+            width=display_width,
+            drawing_mode=drawing_mode,
+            key=f"canvas_{uploaded_file.name}",
+        )
+
+    with col2:
+        st.subheader(f"2. 預覽結果 ({orig_w}x{orig_h})")
+        
+        # --- 核心處理邏輯 ---
+        if canvas_result.image_data is not None:
+            # 取得畫布操作痕跡
+            small_mask_data = canvas_result.image_data
+            
+            # 放大遮罩回原尺寸
+            small_mask_img = Image.fromarray(small_mask_data.astype('uint8'), mode="RGBA")
+            full_size_mask_img = small_mask_img.resize((orig_w, orig_h), resample=Image.NEAREST)
+            full_mask_data = np.array(full_size_mask_img)
+
+            # 準備原始高清圖
+            img_array = np.array(original_image)
+
+            # 執行去背邏輯
+            is_red_area = (full_mask_data[:, :, 0] > 0) & (full_mask_data[:, :, 1] == 0)
+            is_green_area = (full_mask_data[:, :, 1] > 0)
+
+            img_array[is_red_area, 3] = 0   # 挖空
+            img_array[is_green_area, 3] = 255 # 救援
+
+            # 顯示與下載
+            processed_image = Image.fromarray(img_array)
+            st.image(processed_image, caption="預覽圖 (已縮小顯示)", use_column_width=True)
+
+            st.markdown("---")
+            buf = BytesIO()
+            processed_image.save(buf, format="PNG")
+            byte_im = buf.getvalue()
+
+            st.download_button(
+                label="💎 下載高清原圖 PNG (1920x1080)",
+                data=byte_im,
+                file_name="hd_transparent.png",
+                mime="image/png"
+            )
+        else:
+            st.info("👈 請在左側選擇工具並開始操作")
