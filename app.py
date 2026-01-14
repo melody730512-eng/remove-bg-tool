@@ -4,22 +4,36 @@ import numpy as np
 from streamlit_drawable_canvas import st_canvas
 
 # --- 頁面設定 ---
-st.set_page_config(page_title="混合去背神器", layout="wide")
-st.title("🛠️ Vibe Coding: 混合去背神器 (紅框+綠筆)")
+st.set_page_config(page_title="高清去背神器", layout="wide")
+st.title("💎 Vibe Coding: 高清去背神器 (替身模式)")
 st.markdown("""
-**終極操作指南：**
-1. 🟥 **紅色框 (挖空)**：切換到此模式，快速拉框框挖掉大背景。
-2. 🟩 **綠色筆 (救援)**：切換到此模式，用塗抹的方式，精細地把誤刪的地方補回來！
-**Vibe Logic：** 綠筆塗過的地方擁有最高優先權 (救援成功)。
+**特點：**
+* 即使原圖是 **4K 或 1920x1080**，操作依然絲滑流暢。
+* **下載結果保證 100% 原解析度**，絕不壓縮！
 """)
 
 # --- 主畫面 ---
 uploaded_file = st.file_uploader("請將圖片拖曳到這裡 (JPG/PNG)", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
-    # 讀取原始圖片
+    # 1. 讀取原始圖片 (這是高清原檔，絕對不動它)
     original_image = Image.open(uploaded_file).convert("RGBA")
-    img_width, img_height = original_image.size
+    orig_w, orig_h = original_image.size
+
+    # 2. 製作「替身」圖片 (Proxy)
+    # 設定顯示寬度為 800px (這只是給你看的，不會影響輸出)
+    display_width = 800
+    
+    # 計算縮放倍率 (Scale Factor)
+    if orig_w > display_width:
+        scale_factor = orig_w / display_width
+        display_height = int(orig_h / scale_factor)
+        # 產生縮小版圖片放入畫布
+        display_image = original_image.resize((display_width, display_height))
+    else:
+        scale_factor = 1.0
+        display_image = original_image
+        display_height = orig_h
 
     # 建立兩欄佈局
     col1, col2 = st.columns(2)
@@ -27,82 +41,85 @@ if uploaded_file:
     with col1:
         st.subheader("1. 工具操作區")
         
-        # --- 工具選擇 (關鍵修改) ---
+        # --- 工具選擇 ---
         tool_mode = st.radio("選擇你的武器：", ("🟥 紅框 (拉框挖空)", "🟩 綠筆 (塗抹救援)"), horizontal=True)
         
         # --- 動態設定畫布參數 ---
         if tool_mode == "🟥 紅框 (拉框挖空)":
-            # 紅框模式設定
-            drawing_mode = "rect"       # 矩形模式
-            stroke_color = "#ff0000"    # 紅色邊框
-            fill_color = "rgba(255, 0, 0, 0.3)" # 半透明紅填充
-            stroke_width = 2            # 框框線條固定細一點
-            st.caption("目前模式：拉出矩形框框")
+            drawing_mode = "rect"
+            stroke_color = "#ff0000"
+            fill_color = "rgba(255, 0, 0, 0.3)"
+            stroke_width = 2
         else:
-            # 綠筆模式設定
-            drawing_mode = "freedraw"   # 自由塗抹模式
-            stroke_color = "#00ff00"    # 純綠色筆觸
-            fill_color = "rgba(0, 255, 0, 0)" # 塗抹不需要填充色
-            # 只有在綠筆模式才需要調整筆刷大小
+            drawing_mode = "freedraw"
+            stroke_color = "#00ff00"
+            fill_color = "rgba(0, 255, 0, 0)"
             stroke_width = st.slider("🟩 綠筆大小", 1, 50, 15)
-            st.caption("目前模式：自由塗抹救援")
 
-        # --- 建立畫布 (參數是動態的) ---
+        # --- 建立畫布 (使用縮小版 display_image) ---
         canvas_result = st_canvas(
             fill_color=fill_color,
             stroke_width=stroke_width,
             stroke_color=stroke_color,
-            background_image=original_image,
+            background_image=display_image, # 這裡放替身圖
             update_streamlit=True,
-            height=img_height,
-            width=img_width,
-            drawing_mode=drawing_mode, # 這裡會根據上面的選擇變動
-            key="canvas_hybrid",
+            height=display_height,
+            width=display_width, # 固定寬度，保證流暢
+            drawing_mode=drawing_mode,
+            key=f"canvas_{uploaded_file.name}",
         )
 
     with col2:
-        st.subheader("2. 預覽結果")
+        st.subheader(f"2. 預覽結果 ({orig_w}x{orig_h})")
         
-        # --- 核心處理邏輯 (使用影像遮罩法) ---
-        # 檢查畫布上是否有內容
+        # --- 核心處理邏輯 (還原倍率) ---
         if canvas_result.image_data is not None:
-            # 1. 取得畫布的作畫結果 (這是一張 RGBA 圖片，上面有你畫的紅框和綠筆跡)
-            mask_data = canvas_result.image_data
+            # 1. 取得畫布上的操作痕跡 (這是縮小版的遮罩)
+            small_mask_data = canvas_result.image_data
             
-            # 2. 把原始圖片轉成陣列準備處理
+            # 2. 將遮罩「放大」回原始尺寸
+            # 把 canvas 的 array 轉成 Image 物件
+            small_mask_img = Image.fromarray(small_mask_data.astype('uint8'), mode="RGBA")
+            # 關鍵步驟：重新放大到原始尺寸 (Resample 使用 Nearest 保持邊緣銳利，或 Bilinear 柔和)
+            full_size_mask_img = small_mask_img.resize((orig_w, orig_h), resample=Image.NEAREST)
+            # 轉回 numpy array
+            full_mask_data = np.array(full_size_mask_img)
+
+            # 3. 準備原始高清圖的陣列
             img_array = np.array(original_image)
 
-            # 3. Vibe Logic: 分析畫布顏色
-            # 找出哪些地方有畫紅色 (R通道 > 0 且 G通道沒有東西)
-            is_red_area = (mask_data[:, :, 0] > 0) & (mask_data[:, :, 1] == 0)
-            # 找出哪些地方有畫綠色 (G通道 > 0)
-            is_green_area = (mask_data[:, :, 1] > 0)
+            # 4. Vibe Logic (跟之前一樣，但這次是用放大後的遮罩)
+            # 找出紅色區域 (挖空)
+            is_red_area = (full_mask_data[:, :, 0] > 0) & (full_mask_data[:, :, 1] == 0)
+            # 找出綠色區域 (救援)
+            is_green_area = (full_mask_data[:, :, 1] > 0)
 
-            # 4. 執行動作
-            # 動作 A: 把紅色區域變透明 (Alpha = 0)
-            img_array[is_red_area, 3] = 0
-            
-            # 動作 B (救援): 把綠色區域變回不透明 (Alpha = 255)，這會覆蓋掉動作 A
-            img_array[is_green_area, 3] = 255
+            # 5. 執行動作 (在高清圖上修改)
+            img_array[is_red_area, 3] = 0   # 變透明
+            img_array[is_green_area, 3] = 255 # 救回來
 
-            # 5. 轉回圖片
+            # 6. 轉回圖片
             processed_image = Image.fromarray(img_array)
             
-            # 顯示結果
-            st.image(processed_image, use_column_width=True)
+            # 為了讓預覽不要撐爆網頁，預覽圖也縮小顯示，但下載的是大圖
+            st.image(processed_image, caption="預覽圖 (已縮小顯示)", use_column_width=True)
 
             # --- 下載按鈕 ---
             st.markdown("---")
+            st.success(f"處理完成！圖片尺寸維持：{processed_image.size[0]} x {processed_image.size[1]}")
+            
             from io import BytesIO
             buf = BytesIO()
+            # 儲存時使用原始的高清圖
             processed_image.save(buf, format="PNG")
             byte_im = buf.getvalue()
 
             st.download_button(
-                label="📥 下載處理好的 PNG",
+                label="💎 下載高清原圖 PNG (1920x1080)",
                 data=byte_im,
-                file_name="hybrid_transparent.png",
+                file_name="hd_transparent.png",
                 mime="image/png"
             )
         else:
             st.info("👈 請在左側選擇工具並開始操作")
+            
