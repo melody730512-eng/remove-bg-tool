@@ -4,113 +4,106 @@ import numpy as np
 from streamlit_drawable_canvas import st_canvas
 from io import BytesIO
 
-# --- 頁面設定 ---
-st.set_page_config(page_title="高清去背神器", layout="wide")
-st.title("💎 Vibe Coding: 高清去背神器 (替身模式)")
-st.markdown("""
-**特點：**
-* 即使原圖是 **4K 或 1920x1080**，操作依然絲滑流暢。
-* **下載結果保證 100% 原解析度**，絕不壓縮！
-""")
+# --- 1. 頁面基礎設定 ---
+st.set_page_config(page_title="方塊去背 (重製版)", layout="wide")
+st.title("🔲 Vibe Coding: 方塊去背 (紅框挖/綠框補)")
 
-# --- 主畫面 ---
-uploaded_file = st.file_uploader("請將圖片拖曳到這裡 (JPG/PNG)", type=["png", "jpg", "jpeg"])
+# --- 2. 上傳圖片 ---
+uploaded_file = st.file_uploader("請上傳圖片 (JPG/PNG)", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
-    # 1. 讀取原始圖片
+    # A. 讀取原始高清圖 (這是最後要下載用的)
+    # convert("RGBA") 確保它有透明色版
     original_image = Image.open(uploaded_file).convert("RGBA")
     orig_w, orig_h = original_image.size
 
-    # 2. 製作「替身」圖片 (Proxy)
+    # B. 製作畫布用的「縮圖」 (這是給瀏覽器顯示用的)
+    # 限制寬度 800px，高度按比例縮放
     display_width = 800
-    
-    # 計算縮放倍率
     if orig_w > display_width:
         scale_factor = orig_w / display_width
         display_height = int(orig_h / scale_factor)
         display_image = original_image.resize((display_width, display_height))
     else:
         scale_factor = 1.0
-        display_image = original_image
         display_height = orig_h
+        display_image = original_image
 
-    # === 關鍵修正：轉成純 RGB 模式 ===
-    # 不用 Numpy (會報錯)，也不用 RGBA (會變白)
-    # 使用 .convert("RGB") 強制變成不透明圖片，這樣瀏覽器保證能顯示！
-    canvas_background = display_image.convert("RGB")
+    # C. 重要修正：畫布背景強制轉為 RGB (解決白屏問題)
+    canvas_bg = display_image.convert("RGB")
 
-    # 建立兩欄佈局
+    # --- 3. 介面佈局 ---
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("1. 工具操作區")
+        st.subheader("1. 拉框操作區")
+        mode = st.radio("選擇功能：", ("🟥 紅框 (挖掉)", "🟩 綠框 (救回)"), horizontal=True)
         
-        # --- 工具選擇 ---
-        tool_mode = st.radio("選擇你的武器：", ("🟥 紅框 (拉框挖空)", "🟩 綠筆 (塗抹救援)"), horizontal=True)
-        
-        # --- 動態設定畫布參數 ---
-        if tool_mode == "🟥 紅框 (拉框挖空)":
-            drawing_mode = "rect"
-            stroke_color = "#ff0000"
-            fill_color = "rgba(255, 0, 0, 0.3)" # 這裡我也再次確認語法正確了
-            stroke_width = 2
+        # 設定畫筆顏色
+        if mode == "🟥 紅框 (挖掉)":
+            stroke = "#ff0000"
+            fill = "rgba(255, 0, 0, 0.3)"
         else:
-            drawing_mode = "freedraw"
-            stroke_color = "#00ff00"
-            fill_color = "rgba(0, 255, 0, 0)"
-            stroke_width = st.slider("🟩 綠筆大小", 1, 50, 15)
+            stroke = "#00ff00"
+            fill = "rgba(0, 255, 0, 0.3)"
 
-        # --- 建立畫布 ---
+        # 建立畫布 (使用縮圖)
         canvas_result = st_canvas(
-            fill_color=fill_color,
-            stroke_width=stroke_width,
-            stroke_color=stroke_color,
-            background_image=canvas_background, # 這裡傳入 RGB 圖片
+            fill_color=fill,
+            stroke_width=2,
+            stroke_color=stroke,
+            background_image=canvas_bg, # 傳入 RGB 縮圖
             update_streamlit=True,
             height=display_height,
             width=display_width,
-            drawing_mode=drawing_mode,
-            key=f"canvas_{uploaded_file.name}",
+            drawing_mode="rect", # 鎖定矩形模式 (最穩定)
+            key="canvas_reset",
         )
 
     with col2:
-        st.subheader(f"2. 預覽結果 ({orig_w}x{orig_h})")
-        
-        # --- 核心處理邏輯 ---
-        if canvas_result.image_data is not None:
-            # 取得畫布操作痕跡
-            small_mask_data = canvas_result.image_data
+        st.subheader("2. 預覽結果")
+
+        # --- 4. 核心運算 (座標還原法) ---
+        if canvas_result.json_data is not None:
+            objects = canvas_result.json_data["objects"]
             
-            # 放大遮罩回原尺寸
-            small_mask_img = Image.fromarray(small_mask_data.astype('uint8'), mode="RGBA")
-            full_size_mask_img = small_mask_img.resize((orig_w, orig_h), resample=Image.NEAREST)
-            full_mask_data = np.array(full_size_mask_img)
+            if len(objects) > 0:
+                # 轉成陣列準備開刀
+                img_array = np.array(original_image)
 
-            # 準備原始高清圖
-            img_array = np.array(original_image)
+                for obj in objects:
+                    # 取得縮圖上的座標
+                    small_left = obj["left"]
+                    small_top = obj["top"]
+                    small_w = obj["width"]
+                    small_h = obj["height"]
+                    color = obj["stroke"]
 
-            # 執行去背邏輯
-            is_red_area = (full_mask_data[:, :, 0] > 0) & (full_mask_data[:, :, 1] == 0)
-            is_green_area = (full_mask_data[:, :, 1] > 0)
+                    # 數學還原：把座標放大回原始尺寸
+                    # 例如：縮圖是 1/2 大小，這裡就 x2 變回原圖座標
+                    real_left = int(small_left * scale_factor)
+                    real_top = int(small_top * scale_factor)
+                    real_w = int(small_w * scale_factor)
+                    real_h = int(small_h * scale_factor)
 
-            img_array[is_red_area, 3] = 0   # 挖空
-            img_array[is_green_area, 3] = 255 # 救援
+                    # 確保座標有效
+                    if real_w > 0 and real_h > 0:
+                        # 紅框 = 透明 (0)
+                        if color == "#ff0000":
+                            img_array[real_top : real_top+real_h, real_left : real_left+real_w, 3] = 0
+                        # 綠框 = 實心 (255)
+                        elif color == "#00ff00":
+                            img_array[real_top : real_top+real_h, real_left : real_left+real_w, 3] = 255
+                
+                # 顯示結果
+                final_image = Image.fromarray(img_array)
+                # 預覽圖也縮小顯示，避免撐爆版面
+                st.image(final_image, caption=f"最終尺寸: {orig_w}x{orig_h}", use_column_width=True)
 
-            # 顯示與下載
-            processed_image = Image.fromarray(img_array)
-            st.image(processed_image, caption="預覽圖 (已縮小顯示)", use_column_width=True)
-
-            st.markdown("---")
-            buf = BytesIO()
-            processed_image.save(buf, format="PNG")
-            byte_im = buf.getvalue()
-
-            st.download_button(
-                label="💎 下載高清原圖 PNG",
-                data=byte_im,
-                file_name="hd_transparent.png",
-                mime="image/png"
-            )
-        else:
-            st.info("👈 請在左側選擇工具並開始操作")
-            
+                # 下載按鈕
+                buf = BytesIO()
+                final_image.save(buf, format="PNG")
+                byte_im = buf.getvalue()
+                st.download_button("📥 下載成品 PNG", byte_im, "final.png", "image/png")
+            else:
+                st.info("👈 請在左邊拉框框")
